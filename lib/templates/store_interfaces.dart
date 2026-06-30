@@ -8,6 +8,11 @@ abstract class StorePush {
   Future<void> init();
   Future<PushNotificationStatus> requestPermission();
   String? get token;
+
+  /// Завершается, когда фоновый дофетч FCM-токена закончился — значением токена
+  /// или null. Потребителям, которым нужен реальный токен (например, генерация
+  /// affsub), можно дождаться этого Future, не блокируя инициализацию.
+  Future<String?> get tokenReady;
   Future<PushNotificationStatus> get checkPermissionStatus;
   PushNotification? get initialMessage;
   Stream<PushNotification> get onMessageReceived;

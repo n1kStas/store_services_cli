@@ -26,8 +26,14 @@ class HmsAnalyticsImpl implements StoreAnalytics {
 class HmsPushImpl implements StorePush {
   String? _token;
 
+  /// Завершается значением токена (или null) после фонового дофетча в [init].
+  final Completer<String?> _tokenReady = Completer<String?>();
+
   @override
   String? get token => _token;
+
+  @override
+  Future<String?> get tokenReady => _tokenReady.future;
 
   PushNotificationStatus _permissionStatus =
       PushNotificationStatus.notDetermined;
@@ -92,9 +98,15 @@ class HmsPushImpl implements StorePush {
     Push.getTokenStream.listen(
       (token) {
         _token = token;
+        if (!_tokenReady.isCompleted) {
+          _tokenReady.complete(_token);
+        }
       },
       onError: (error) {
         _token = null;
+        if (!_tokenReady.isCompleted) {
+          _tokenReady.complete(null);
+        }
       },
     );
   }

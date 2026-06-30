@@ -12,6 +12,11 @@ abstract class StorePush {
   Future<void> init();
   Future<PushNotificationStatus> requestPermission();
   String? get token;
+
+  /// Завершается, когда фоновый дофетч FCM-токена закончился — значением токена
+  /// или null. Потребителям, которым нужен реальный токен (например, генерация
+  /// affsub), можно дождаться этого Future, не блокируя инициализацию.
+  Future<String?> get tokenReady;
   Future<PushNotificationStatus> get checkPermissionStatus;
   PushNotification? get initialMessage;
   Stream<PushNotification> get onMessageReceived;
@@ -271,6 +276,12 @@ class FirebasePushImpl implements StorePush {
 
   String? _token;
 
+  /// Завершается значением токена (или null) после фонового дофетча в [init].
+  final Completer<String?> _tokenReady = Completer<String?>();
+
+  @override
+  Future<String?> get tokenReady => _tokenReady.future;
+
   PushNotificationStatus _permissionStatus =
       PushNotificationStatus.notDetermined;
 
@@ -280,10 +291,21 @@ class FirebasePushImpl implements StorePush {
   @override
   Future<void> init() async {
     _permissionStatusReceived.add(PushNotificationStatus.notDetermined);
-    _token = await _getToken();
+    // Слушатели и initial message ставим сразу — это локально, без сети.
     await _initInitialMessage();
     _handleOnMessageReceived();
     _handleOnMessageOpenedApp();
+    // FCM-токен дофетчиваем в фоне: getToken на заблокированном эндпоинте (РФ)
+    // может висеть ~30с. Не блокируем инициализацию; готовность — через
+    // [tokenReady].
+    unawaited(_initToken());
+  }
+
+  Future<void> _initToken() async {
+    _token = await _getToken();
+    if (!_tokenReady.isCompleted) {
+      _tokenReady.complete(_token);
+    }
   }
 
   Future<String?> _getToken() async {
@@ -445,7 +467,12 @@ class FirebaseService {
       await analytics.init();
       await ads.init();
       await push.init();
-      await remoteConfig.fetchAndActivate();
+      // Remote Config фетчим в фоне: сетевой вызов Google-эндпоинта в РФ может
+      // висеть/падать по таймауту. Не блокируем инициализацию — значение
+      // подхватится, когда (и если) фетч завершится.
+      unawaited(remoteConfig.fetchAndActivate().catchError((Object e) {
+        print('🔥 RemoteConfig fetch failed (background): $e');
+      }));
 
       print('🔥 Firebase Adapters initialized');
     } catch (e) {
@@ -484,8 +511,14 @@ class HmsAnalyticsImpl implements StoreAnalytics {
 class HmsPushImpl implements StorePush {
   String? _token;
 
+  /// Завершается значением токена (или null) после фонового дофетча в [init].
+  final Completer<String?> _tokenReady = Completer<String?>();
+
   @override
   String? get token => _token;
+
+  @override
+  Future<String?> get tokenReady => _tokenReady.future;
 
   PushNotificationStatus _permissionStatus =
       PushNotificationStatus.notDetermined;
@@ -550,9 +583,15 @@ class HmsPushImpl implements StorePush {
     Push.getTokenStream.listen(
       (token) {
         _token = token;
+        if (!_tokenReady.isCompleted) {
+          _tokenReady.complete(_token);
+        }
       },
       onError: (error) {
         _token = null;
+        if (!_tokenReady.isCompleted) {
+          _tokenReady.complete(null);
+        }
       },
     );
   }
