@@ -612,7 +612,6 @@ subprojects {
       url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
       ref: hms_push_flutter_3.29
       path: flutter-hms-availability
-  permission_handler: ^12.0.1
 ''';
 
       if (newContent.contains('dependencies:')) {
@@ -620,6 +619,15 @@ subprojects {
           newContent = newContent.replaceFirst(
             'dependencies:',
             'dependencies:\n$deps',
+          );
+          changed = true;
+        }
+        // permission_handler добавляем отдельно, только если его ещё нет,
+        // чтобы не создать дубликат ключа в pubspec.yaml.
+        if (!newContent.contains('permission_handler:')) {
+          newContent = newContent.replaceFirst(
+            'dependencies:',
+            'dependencies:\n  permission_handler: ^12.0.1',
           );
           changed = true;
         }
