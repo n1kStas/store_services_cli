@@ -21,6 +21,7 @@ class StoreService {
   late final StoreRemoteConfig remoteConfig;
 
   bool _isHms = false;
+  bool _adaptersAssigned = false;
 
   Future<void> init() async {
     // Check HMS Availability
@@ -39,20 +40,26 @@ class StoreService {
       final service = HmsService();
       await service.init();
 
-      analytics = service.analytics;
-      push = service.push;
-      ads = service.ads;
-      remoteConfig = service.remoteConfig;
+      if (!_adaptersAssigned) {
+        analytics = service.analytics;
+        push = service.push;
+        ads = service.ads;
+        remoteConfig = service.remoteConfig;
+        _adaptersAssigned = true;
+      }
 
       print('✅ StoreService initialized in HMS Mode');
     } else {
       final service = FirebaseService();
       await service.init();
 
-      analytics = service.analytics;
-      push = service.push;
-      ads = service.ads;
-      remoteConfig = service.remoteConfig;
+      if (!_adaptersAssigned) {
+        analytics = service.analytics;
+        push = service.push;
+        ads = service.ads;
+        remoteConfig = service.remoteConfig;
+        _adaptersAssigned = true;
+      }
 
       print('✅ StoreService initialized in GMS Mode');
     }

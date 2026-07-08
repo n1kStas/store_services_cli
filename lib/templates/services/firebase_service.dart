@@ -235,15 +235,20 @@ class FirebaseService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersCreated = false;
+
   Future<void> init() async {
     try {
       await Firebase.initializeApp();
       print('🔥 FirebaseService initialized');
 
-      analytics = FirebaseAnalyticsImpl();
-      push = FirebasePushImpl();
-      ads = FirebaseAdsImpl();
-      remoteConfig = FirebaseRemoteConfigImpl();
+      if (!_adaptersCreated) {
+        analytics = FirebaseAnalyticsImpl();
+        push = FirebasePushImpl();
+        ads = FirebaseAdsImpl();
+        remoteConfig = FirebaseRemoteConfigImpl();
+        _adaptersCreated = true;
+      }
 
       await analytics.init();
       await ads.init();

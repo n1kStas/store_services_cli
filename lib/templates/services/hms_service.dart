@@ -218,13 +218,18 @@ class HmsService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersCreated = false;
+
   Future<void> init() async {
     print('🔴 HmsService initialized');
 
-    analytics = HmsAnalyticsImpl();
-    push = HmsPushImpl();
-    ads = HmsAdsImpl();
-    remoteConfig = HmsRemoteConfigImpl();
+    if (!_adaptersCreated) {
+      analytics = HmsAnalyticsImpl();
+      push = HmsPushImpl();
+      ads = HmsAdsImpl();
+      remoteConfig = HmsRemoteConfigImpl();
+      _adaptersCreated = true;
+    }
 
     await analytics.init();
     await ads.init();

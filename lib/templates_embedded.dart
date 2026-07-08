@@ -100,16 +100,21 @@ class StoreService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersAssigned = false;
+
   Future<void> init() async {
     // 1. Init Firebase (and adapters internally)
     final service = FirebaseService();
     await service.init();
 
     // 2. Assign adapters from service
-    analytics = service.analytics;
-    push = service.push;
-    ads = service.ads;
-    remoteConfig = service.remoteConfig;
+    if (!_adaptersAssigned) {
+      analytics = service.analytics;
+      push = service.push;
+      ads = service.ads;
+      remoteConfig = service.remoteConfig;
+      _adaptersAssigned = true;
+    }
 
     print('✅ StoreService (GMS) fully initialized');
   }
@@ -137,16 +142,21 @@ class StoreService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersAssigned = false;
+
   Future<void> init() async {
     // 1. Init HMS (and adapters internally)
     final service = HmsService();
     await service.init();
 
     // 2. Assign adapters
-    analytics = service.analytics;
-    push = service.push;
-    ads = service.ads;
-    remoteConfig = service.remoteConfig;
+    if (!_adaptersAssigned) {
+      analytics = service.analytics;
+      push = service.push;
+      ads = service.ads;
+      remoteConfig = service.remoteConfig;
+      _adaptersAssigned = true;
+    }
 
     print('✅ StoreService (HMS) fully initialized');
   }
@@ -177,6 +187,7 @@ class StoreService {
   late final StoreRemoteConfig remoteConfig;
 
   bool _isHms = false;
+  bool _adaptersAssigned = false;
 
   Future<void> init() async {
     // Check HMS Availability
@@ -195,20 +206,26 @@ class StoreService {
       final service = HmsService();
       await service.init();
 
-      analytics = service.analytics;
-      push = service.push;
-      ads = service.ads;
-      remoteConfig = service.remoteConfig;
+      if (!_adaptersAssigned) {
+        analytics = service.analytics;
+        push = service.push;
+        ads = service.ads;
+        remoteConfig = service.remoteConfig;
+        _adaptersAssigned = true;
+      }
 
       print('✅ StoreService initialized in HMS Mode');
     } else {
       final service = FirebaseService();
       await service.init();
 
-      analytics = service.analytics;
-      push = service.push;
-      ads = service.ads;
-      remoteConfig = service.remoteConfig;
+      if (!_adaptersAssigned) {
+        analytics = service.analytics;
+        push = service.push;
+        ads = service.ads;
+        remoteConfig = service.remoteConfig;
+        _adaptersAssigned = true;
+      }
 
       print('✅ StoreService initialized in GMS Mode');
     }
@@ -454,15 +471,20 @@ class FirebaseService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersCreated = false;
+
   Future<void> init() async {
     try {
       await Firebase.initializeApp();
       print('🔥 FirebaseService initialized');
 
-      analytics = FirebaseAnalyticsImpl();
-      push = FirebasePushImpl();
-      ads = FirebaseAdsImpl();
-      remoteConfig = FirebaseRemoteConfigImpl();
+      if (!_adaptersCreated) {
+        analytics = FirebaseAnalyticsImpl();
+        push = FirebasePushImpl();
+        ads = FirebaseAdsImpl();
+        remoteConfig = FirebaseRemoteConfigImpl();
+        _adaptersCreated = true;
+      }
 
       await analytics.init();
       await ads.init();
@@ -703,13 +725,18 @@ class HmsService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersCreated = false;
+
   Future<void> init() async {
     print('🔴 HmsService initialized');
 
-    analytics = HmsAnalyticsImpl();
-    push = HmsPushImpl();
-    ads = HmsAdsImpl();
-    remoteConfig = HmsRemoteConfigImpl();
+    if (!_adaptersCreated) {
+      analytics = HmsAnalyticsImpl();
+      push = HmsPushImpl();
+      ads = HmsAdsImpl();
+      remoteConfig = HmsRemoteConfigImpl();
+      _adaptersCreated = true;
+    }
 
     await analytics.init();
     await ads.init();

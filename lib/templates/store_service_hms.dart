@@ -18,16 +18,21 @@ class StoreService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
+  bool _adaptersAssigned = false;
+
   Future<void> init() async {
     // 1. Init HMS (and adapters internally)
     final service = HmsService();
     await service.init();
 
     // 2. Assign adapters
-    analytics = service.analytics;
-    push = service.push;
-    ads = service.ads;
-    remoteConfig = service.remoteConfig;
+    if (!_adaptersAssigned) {
+      analytics = service.analytics;
+      push = service.push;
+      ads = service.ads;
+      remoteConfig = service.remoteConfig;
+      _adaptersAssigned = true;
+    }
 
     print('✅ StoreService (HMS) fully initialized');
   }
