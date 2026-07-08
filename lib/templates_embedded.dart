@@ -609,7 +609,7 @@ class HmsPushImpl implements StorePush {
     }
   }
 
-  PushNotification _parsePushNotification(Map<String, dynamic> message) {
+  PushNotification _parsePushNotification(Map<Object?, Object?> message) {
     final extras = message['extras'] as Map<Object?, Object?>;
     return PushNotification(
       title: extras['title'] as String?,
