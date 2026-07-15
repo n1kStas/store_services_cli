@@ -14,9 +14,12 @@ void main(List<String> arguments) async {
         await configurator.applyHms();
         break;
       case 3:
-        await configurator.applyHybrid();
+        await configurator.applyRms();
         break;
       case 4:
+        await configurator.applyHybrid();
+        break;
+      case 5:
         await configurator.clean();
         break;
     }

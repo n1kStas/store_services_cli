@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import '../templates_embedded.dart';
 
-enum StoreMode { gms, hms, hybrid }
+enum StoreMode { gms, hms, rms, hybrid }
 
 class AppCodeConfigurator {
   // New target directory: lib/generated/store_service
@@ -35,6 +35,13 @@ class AppCodeConfigurator {
       );
     }
 
+    if (mode == StoreMode.rms || mode == StoreMode.hybrid) {
+      await _writeTemplate(
+        rmsServiceTemplate,
+        '$_targetServicesDir/rms_service.dart',
+      );
+    }
+
     // 2. Copy Interfaces
     await _writeTemplate(
       storeInterfacesTemplate,
@@ -49,6 +56,9 @@ class AppCodeConfigurator {
         break;
       case StoreMode.hms:
         templateContent = storeServiceHmsTemplate;
+        break;
+      case StoreMode.rms:
+        templateContent = storeServiceRmsTemplate;
         break;
       case StoreMode.hybrid:
         templateContent = storeServiceHybridTemplate;

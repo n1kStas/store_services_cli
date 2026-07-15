@@ -164,12 +164,18 @@ class StoreService {
 ''';
 
 const String storeServiceHybridTemplate = r'''
+import 'package:firebase_core/firebase_core.dart' hide FirebaseService;
+import 'package:flutter_rustore_push/flutter_rustore_push.dart';
+import 'package:google_api_availability/google_api_availability.dart';
 import 'package:huawei_hmsavailability/huawei_hmsavailability.dart';
 import 'services/firebase_service.dart';
 import 'services/hms_service.dart';
+import 'services/rms_service.dart';
 import 'store_interfaces.dart';
 
 export 'store_interfaces.dart';
+
+enum _StoreBackend { gms, hms, rms }
 
 class StoreService {
   static final StoreService _instance = StoreService._internal();
@@ -186,49 +192,101 @@ class StoreService {
   late final StoreAds ads;
   late final StoreRemoteConfig remoteConfig;
 
-  bool _isHms = false;
   bool _adaptersAssigned = false;
 
   Future<void> init() async {
-    // Check HMS Availability
+    final backend = await _detectBackend();
+
+    switch (backend) {
+      case _StoreBackend.hms:
+        final service = HmsService();
+        await service.init();
+        _assignAdapters(
+            service.analytics, service.push, service.ads, service.remoteConfig);
+        print('✅ StoreService initialized in HMS Mode');
+        break;
+      case _StoreBackend.rms:
+        final service = RmsService();
+        await service.init();
+        final analytics = await _resolveAnalytics(service.analytics);
+        _assignAdapters(
+            analytics, service.push, service.ads, service.remoteConfig);
+        print('✅ StoreService initialized in RuStore Mode');
+        break;
+      case _StoreBackend.gms:
+        final service = FirebaseService();
+        await service.init();
+        _assignAdapters(
+            service.analytics, service.push, service.ads, service.remoteConfig);
+        print('✅ StoreService initialized in GMS Mode');
+        break;
+    }
+  }
+
+  void _assignAdapters(StoreAnalytics analytics, StorePush push, StoreAds ads,
+      StoreRemoteConfig remoteConfig) {
+    if (_adaptersAssigned) return;
+    this.analytics = analytics;
+    this.push = push;
+    this.ads = ads;
+    this.remoteConfig = remoteConfig;
+    _adaptersAssigned = true;
+  }
+
+  /// RuStore не предоставляет app instance id. Пробуем цепочку:
+  /// HMS AAID → Firebase appInstanceId (работает и без Google Play services) →
+  /// исходная заглушка RuStore (NA).
+  Future<StoreAnalytics> _resolveAnalytics(StoreAnalytics primary) async {
+    if (primary.appInstanceId != null) return primary;
     try {
-      final hmsApi = HmsApiAvailability();
-      final result = await hmsApi.isHMSAvailable();
-      // 0 means SUCCESS (HMS Available)
-      _isHms = result == 0;
-      print('🔍 HMS Available: $_isHms (Code: $result)');
+      final hms = HmsAnalyticsImpl();
+      await hms.init();
+      if (hms.appInstanceId != null) return hms;
+    } catch (_) {}
+    try {
+      await Firebase.initializeApp();
+      final firebase = FirebaseAnalyticsImpl();
+      await firebase.init();
+      if (firebase.appInstanceId != null) return firebase;
+    } catch (_) {}
+    return primary;
+  }
+
+  /// Selection priority: RuStore → HMS (Huawei) → GMS (Google Play) fallback.
+  Future<_StoreBackend> _detectBackend() async {
+    try {
+      final available = await RustorePushClient.available();
+      if (available) {
+        print('🔍 RuStore available');
+        return _StoreBackend.rms;
+      }
     } catch (e) {
-      print('⚠️ HmsApiAvailability check failed: $e');
-      _isHms = false;
+      print('⚠️ RuStore availability check failed: $e');
     }
 
-    if (_isHms) {
-      final service = HmsService();
-      await service.init();
-
-      if (!_adaptersAssigned) {
-        analytics = service.analytics;
-        push = service.push;
-        ads = service.ads;
-        remoteConfig = service.remoteConfig;
-        _adaptersAssigned = true;
+    try {
+      final result = await HmsApiAvailability().isHMSAvailable();
+      if (result == 0) {
+        print('🔍 HMS available');
+        return _StoreBackend.hms;
       }
-
-      print('✅ StoreService initialized in HMS Mode');
-    } else {
-      final service = FirebaseService();
-      await service.init();
-
-      if (!_adaptersAssigned) {
-        analytics = service.analytics;
-        push = service.push;
-        ads = service.ads;
-        remoteConfig = service.remoteConfig;
-        _adaptersAssigned = true;
-      }
-
-      print('✅ StoreService initialized in GMS Mode');
+    } catch (e) {
+      print('⚠️ HMS availability check failed: $e');
     }
+
+    try {
+      final gms = await GoogleApiAvailability.instance
+          .checkGooglePlayServicesAvailability();
+      if (gms == GooglePlayServicesAvailability.success) {
+        print('🔍 GMS available');
+        return _StoreBackend.gms;
+      }
+    } catch (e) {
+      print('⚠️ GMS availability check failed: $e');
+    }
+
+    print('🔍 No store detected, falling back to GMS');
+    return _StoreBackend.gms;
   }
 }
 ''';
@@ -508,6 +566,7 @@ const String hmsServiceTemplate = r'''
 import 'dart:async';
 
 import 'package:huawei_ads/huawei_ads.dart';
+import 'package:huawei_analytics/huawei_analytics.dart';
 import 'package:huawei_push/huawei_push.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -524,9 +583,15 @@ class HmsAnalyticsImpl implements StoreAnalytics {
     _appInstanceId = await _getAppInstanceId();
   }
 
+  /// HMS Analytics AAID (Anonymous Application ID) — аналог Firebase app
+  /// instance id для устройств Huawei.
   Future<String?> _getAppInstanceId() async {
-    await Future.delayed(const Duration(seconds: 1));
-    return null;
+    try {
+      final analytics = await HMSAnalytics.getInstance();
+      return await analytics.getAAID();
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -744,6 +809,280 @@ class HmsService {
     await remoteConfig.fetchAndActivate();
 
     print('🔴 Hms Adapters initialized');
+  }
+}
+''';
+
+const String storeServiceRmsTemplate = r'''
+import 'services/rms_service.dart';
+import 'store_interfaces.dart';
+
+export 'store_interfaces.dart';
+
+class StoreService {
+  static final StoreService _instance = StoreService._internal();
+
+  factory StoreService() {
+    return _instance;
+  }
+
+  StoreService._internal();
+
+  late final StoreAnalytics analytics;
+  late final StorePush push;
+  late final StoreAds ads;
+  late final StoreRemoteConfig remoteConfig;
+
+  bool _adaptersAssigned = false;
+
+  Future<void> init() async {
+    final service = RmsService();
+    await service.init();
+
+    if (!_adaptersAssigned) {
+      analytics = service.analytics;
+      push = service.push;
+      ads = service.ads;
+      remoteConfig = service.remoteConfig;
+      _adaptersAssigned = true;
+    }
+
+    print('✅ StoreService (RuStore) fully initialized');
+  }
+}
+''';
+
+const String rmsServiceTemplate = r'''
+import 'dart:async';
+
+import 'package:advertising_id/advertising_id.dart';
+import 'package:flutter_rustore_push/flutter_rustore_push.dart';
+import 'package:huawei_ads/huawei_ads.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import '../store_interfaces.dart';
+
+class RmsAnalyticsImpl implements StoreAnalytics {
+  @override
+  String? get appInstanceId => null;
+
+  @override
+  Future<void> init() async {}
+}
+
+class RmsPushImpl implements StorePush {
+  String? _token;
+
+  /// Завершается значением токена (или null) после фонового дофетча в [init].
+  final Completer<String?> _tokenReady = Completer<String?>();
+
+  @override
+  String? get token => _token;
+
+  @override
+  Future<String?> get tokenReady => _tokenReady.future;
+
+  PushNotificationStatus _permissionStatus =
+      PushNotificationStatus.notDetermined;
+
+  @override
+  PushNotificationStatus get permissionStatus => _permissionStatus;
+
+  final _permissionStatusReceived =
+      StreamController<PushNotificationStatus>.broadcast();
+
+  @override
+  Stream<PushNotificationStatus> get permissionStatusReceived =>
+      _permissionStatusReceived.stream;
+
+  @override
+  Future<PushNotificationStatus> get checkPermissionStatus async {
+    final status = await Permission.notification.status;
+    _permissionStatus = status == PermissionStatus.granted
+        ? PushNotificationStatus.authorized
+        : PushNotificationStatus.denied;
+    _permissionStatusReceived.add(_permissionStatus);
+    return _permissionStatus;
+  }
+
+  PushNotification? _initialMessage;
+
+  @override
+  PushNotification? get initialMessage => _initialMessage;
+
+  final _onMessageReceived = StreamController<PushNotification>.broadcast();
+
+  @override
+  Stream<PushNotification> get onMessageReceived => _onMessageReceived.stream;
+
+  @override
+  Future<void> init() async {
+    RustorePushClient.attachCallbacks(
+      onNewToken: (token) {
+        _token = token;
+        if (!_tokenReady.isCompleted) {
+          _tokenReady.complete(_token);
+        }
+      },
+      onMessageReceived: (message) {
+        _onMessageReceived.add(_parsePushNotification(message));
+      },
+      onMessageOpenedApp: (message) {
+        _onMessageReceived.add(_parsePushNotification(message));
+      },
+      onDeletedMessages: () {},
+      onError: (error) {},
+    );
+
+    await _getToken();
+    await _initInitialMessage();
+  }
+
+  Future<void> _getToken() async {
+    try {
+      _token = await RustorePushClient.getToken();
+    } catch (_) {
+      _token = null;
+    }
+    if (!_tokenReady.isCompleted) {
+      _tokenReady.complete(_token);
+    }
+  }
+
+  Future<void> _initInitialMessage() async {
+    try {
+      final message = await RustorePushClient.getInitialMessage();
+      if (message != null) {
+        _initialMessage = _parsePushNotification(message);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Future<PushNotificationStatus> requestPermission() async {
+    await Permission.notification.request();
+    return checkPermissionStatus;
+  }
+
+  PushNotification _parsePushNotification(dynamic message) {
+    return PushNotification(
+      title: message.notification?.title as String?,
+      body: message.notification?.body as String?,
+      imageUrl: message.notification?.imageUrl as String?,
+      data: _convertData(message.data),
+      messageId: message.messageId as String?,
+    );
+  }
+
+  Map<String, dynamic> _convertData(dynamic data) {
+    if (data is Map) {
+      return data.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return {};
+  }
+}
+
+class RmsAdsImpl implements StoreAds {
+  String? _advertisingId;
+  String _advertisingType = 'RUSTORE';
+
+  @override
+  String get advertisingType => _advertisingType;
+
+  @override
+  String? get advertisingId => _advertisingId;
+
+  @override
+  Future<void> init() async {
+    // RuStore не предоставляет собственный рекламный идентификатор.
+    // Пробуем по цепочке: OAID (Huawei) → GAID (Google) → NA.
+    final oaid = await _getOaid();
+    if (oaid != null && oaid.isNotEmpty) {
+      _advertisingId = oaid;
+      _advertisingType = 'OAID';
+      return;
+    }
+    final gaid = await _getGaid();
+    if (gaid != null && gaid.isNotEmpty) {
+      _advertisingId = gaid;
+      _advertisingType = 'GAID';
+      return;
+    }
+    _advertisingId = null;
+    _advertisingType = 'RUSTORE';
+  }
+
+  Future<String?> _getOaid() async {
+    try {
+      final client = await AdvertisingIdClient.getAdvertisingIdInfo();
+      return client.getId;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _getGaid() async {
+    try {
+      return await AdvertisingId.id(true);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class RmsRemoteConfigImpl implements StoreRemoteConfig {
+  @override
+  Future<void> fetchAndActivate() async {}
+
+  @override
+  String getString(String key) => '';
+
+  @override
+  bool getBool(String key) => false;
+
+  @override
+  int getInt(String key) => 0;
+
+  @override
+  double getDouble(String key) => 0.0;
+
+  @override
+  Map<String, dynamic> getAll() => {};
+}
+
+class RmsService {
+  static final RmsService _instance = RmsService._internal();
+
+  factory RmsService() {
+    return _instance;
+  }
+
+  RmsService._internal();
+
+  late final StoreAnalytics analytics;
+  late final StorePush push;
+  late final StoreAds ads;
+  late final StoreRemoteConfig remoteConfig;
+
+  bool _adaptersCreated = false;
+
+  Future<void> init() async {
+    print('🔵 RmsService initialized');
+
+    if (!_adaptersCreated) {
+      analytics = RmsAnalyticsImpl();
+      push = RmsPushImpl();
+      ads = RmsAdsImpl();
+      remoteConfig = RmsRemoteConfigImpl();
+      _adaptersCreated = true;
+    }
+
+    await analytics.init();
+    await ads.init();
+    await push.init();
+    await remoteConfig.fetchAndActivate();
+
+    print('🔵 Rms Adapters initialized');
   }
 }
 ''';

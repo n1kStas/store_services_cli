@@ -11,6 +11,20 @@ class HmsConfigurator extends BaseConfigurator {
   static const _installReferrer =
       'com.android.installreferrer:installreferrer:2.2';
 
+  // Force Fresco to a 16 KB page-aligned version. huawei_push pulls Fresco 3.1.3
+  // transitively, whose native libs (libnative-filters.so etc.) are 4 KB-aligned
+  // and rejected by Google Play's 16 KB requirement. Fresco 3.4.0+ ships aligned.
+  static const _frescoResolution = '''// Force Fresco (pulled transitively by huawei_push) to a 16 KB page-aligned
+// version. Fresco 3.4.0+ ships 16 KB-aligned native libs (libnative-filters.so etc.);
+// huawei_push pins 3.1.3, which Google Play rejects for 16 KB compatibility.
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "com.facebook.fresco") {
+            useVersion("3.7.0")
+        }
+    }
+}''';
+
   // Resolution strategy snippet
   static const _resolutionStrategySpy = '''
     resolutionStrategy {
@@ -383,6 +397,15 @@ subprojects {
         }
       }
 
+      // 2b. Force 16 KB-aligned Fresco (huawei_push pulls an unaligned version).
+      if (!newContent.contains('com.facebook.fresco')) {
+        newContent = newContent.replaceFirst(
+          'dependencies {',
+          '$_frescoResolution\n\ndependencies {',
+        );
+        changed = true;
+      }
+
       // 3. Replace buildTypes
       // Note: We commented out 'signingConfig = ...' in _hmsBuildTypes to prevent crash if not defined.
       // If user wants it, they must ensure they have it or uncomment it manually.
@@ -446,6 +469,8 @@ subprojects {
           '',
         );
       }
+      // Remove the Fresco 16 KB force block (inserted before dependencies).
+      newContent = newContent.replaceFirst('$_frescoResolution\n\n', '');
 
       // Restore clean buildTypes
       // We assume if we are removing HMS, we want to go back to clean state.
@@ -612,6 +637,11 @@ subprojects {
       url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
       ref: hms_push_flutter_3.29
       path: flutter-hms-availability
+  huawei_analytics:
+    git:
+      url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
+      ref: hms_push_flutter_3.29
+      path: flutter-hms-analytics
 ''';
 
       if (newContent.contains('dependencies:')) {
@@ -654,6 +684,11 @@ subprojects {
       url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
       ref: hms_push_flutter_3.29
       path: flutter-hms-availability
+  huawei_analytics:
+    git:
+      url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
+      ref: hms_push_flutter_3.29
+      path: flutter-hms-analytics
   permission_handler: ^12.0.1
 ''';
 
@@ -673,6 +708,11 @@ subprojects {
       url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
       ref: hms_push_flutter_3.29
       path: flutter-hms-availability
+  huawei_analytics:
+    git:
+      url: https://github.com/Mr-KrY4k/hms-flutter-plugin.git
+      ref: hms_push_flutter_3.29
+      path: flutter-hms-analytics
 ''';
 
       var newContent = content;
