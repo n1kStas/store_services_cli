@@ -80,6 +80,41 @@ configurations.all {
         }
     }''';
 
+  // Комментарий-маркер над buildscript-блоком: по нему и по agcp-classpath
+  // находим/удаляем блок при remove().
+  static const _buildscriptComment =
+      '// Плагину com.huawei.agconnect нужен classpath Android Gradle Plugin (AGP)\n'
+      '// и agcp в buildscript — иначе сборка падает с\n'
+      '// "com.android.tools.build:gradle is not set in the build.gradle file".';
+
+  // Версию AGP тянем из settings.gradle.kts (id("com.android.application")
+  // version "X"), чтобы classpath совпадал с версией плагина. Фоллбэк — 8.11.1.
+  String _detectAgpVersion() {
+    try {
+      final settings = File(settingsGradle).readAsStringSync();
+      final m = RegExp(
+        r'id\("com\.android\.application"\)\s+version\s+"([^"]+)"',
+      ).firstMatch(settings);
+      if (m != null) return m.group(1)!;
+    } catch (_) {}
+    return '8.11.1';
+  }
+
+  String _hmsBuildscriptBlock(String agpVersion) => '''
+$_buildscriptComment
+buildscript {
+    repositories {
+        maven(url = "https://developer.huawei.com/repo/")
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.huawei.agconnect:agcp:$_agconnectVersion")
+        classpath("com.android.tools.build:gradle:$agpVersion")
+    }
+}
+''';
+
   Future<void> apply() async {
     print('🔧 [HMS] Applying configuration...');
 
@@ -233,7 +268,24 @@ configurations.all {
         }
       }
 
-      // 2. Add Classpath
+      // 1b. Гарантируем наличие buildscript-блока с classpath AGP + agcp.
+      // Дефолтный Flutter root build.gradle.kts не содержит buildscript{},
+      // поэтому classpath agcp было некуда прописать и плагин
+      // com.huawei.agconnect падал на apply.
+      if (!newContent.contains('buildscript {')) {
+        final block = _hmsBuildscriptBlock(_detectAgpVersion());
+        if (newContent.contains('val newBuildDir')) {
+          newContent = newContent.replaceFirst(
+            'val newBuildDir',
+            '$block\nval newBuildDir',
+          );
+        } else {
+          newContent = '$block\n$newContent';
+        }
+        changed = true;
+      }
+
+      // 2. Add Classpath (фоллбэк: если buildscript уже был — гибрид/ручной).
       if (!newContent.contains('com.huawei.agconnect:agcp')) {
         if (newContent.contains('dependencies {')) {
           newContent = newContent.replaceFirst(
@@ -328,30 +380,30 @@ subprojects {
         '',
       );
 
-      // Remove buildscript block (Aggressive removal if it looks like ours)
-      // We look for buildscript that contains our classpath
-      if (newContent.contains('buildscript {') &&
-          newContent.contains('com.huawei.agconnect:agcp')) {
-        // We'll remove the HMS classpath
-        newContent = newContent.replaceFirst(
-          RegExp(r'classpath\("com.huawei.agconnect:agcp:[^"]+"\)\n?'),
-          '',
-        );
-        // usage of maven repo in buildscript
-        newContent = newContent.replaceFirst(
-          RegExp(r'maven\(url = "https://developer.huawei.com/repo/"\)\n?'),
-          '',
-        );
+      // Сначала пробуем снять весь наш buildscript-блок точным матчем
+      // (стандартный случай: в блок ничего постороннего не дописывали).
+      // Версию AGP детектим из settings.gradle.kts — на момент remove()
+      // строка id("com.android.application") version "X" ещё на месте.
+      final block = _hmsBuildscriptBlock(_detectAgpVersion());
+      final before = newContent;
+      newContent = newContent
+          .replaceFirst('$block\n', '')
+          .replaceFirst(block, '');
 
-        // If we want to completely revert the "Legacy Buildscript" injection:
-        // We should check if we should remove the whole block.
-        // Given the user manually added it, maybe they want it gone.
-        // But I can't be 100% sure without a parser.
-        // I will leave it at removing HMS specific lines inside it for safety, unless I can match the template.
-
-        // Let's try to match the template keys
-        // If it contains "google()", "mavenCentral()", "gradlePluginPortal()" and dependencies block...
-        // I'll stick to removing hms lines. If empty lines remain, so be it, safer than deleting user's custom buildscript.
+      // Если точного совпадения не было — значит в другом проекте в buildscript
+      // могли дописать своё. Тогда сам блок и чужие строки НЕ трогаем, убираем
+      // только наши: маркер-коммент и оба classpath (agcp + AGP).
+      if (newContent == before) {
+        newContent = newContent
+            .replaceFirst('$_buildscriptComment\n', '')
+            .replaceFirst(
+              RegExp(r' *classpath\("com\.huawei\.agconnect:agcp:[^"]+"\)\n'),
+              '',
+            )
+            .replaceFirst(
+              RegExp(r' *classpath\("com\.android\.tools\.build:gradle:[^"]+"\)\n'),
+              '',
+            );
       }
 
       return newContent;
